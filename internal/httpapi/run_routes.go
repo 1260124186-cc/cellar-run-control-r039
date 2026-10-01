@@ -116,6 +116,30 @@ func registerRunRoutes(mux *http.ServeMux, app *service.Service) {
 		writeJSON(response, http.StatusOK, run)
 	})
 
+	mux.HandleFunc("PUT /v1/runs/{id}/observations", func(response http.ResponseWriter, request *http.Request) {
+		body, err := decodeJSON[observationRequest](response, request)
+		if !handleDecode(response, err) {
+			return
+		}
+		expected, err := expectedVersion(request)
+		if !handleDecode(response, err) {
+			return
+		}
+		run, err := app.UpdateObservation(request.PathValue("id"), service.ObservationInput{
+			ExpectedVersion: expected,
+			Sequence:        body.Sequence,
+			Gravity:         body.Gravity,
+			TemperatureC:    body.TemperatureC,
+			ObservedAt:      body.ObservedAt,
+			Note:            body.Note,
+		})
+		if err != nil {
+			writeDomainError(response, err)
+			return
+		}
+		writeJSON(response, http.StatusOK, run)
+	})
+
 	mux.HandleFunc("POST /v1/runs/{id}/conditioning", func(response http.ResponseWriter, request *http.Request) {
 		expected, err := expectedVersion(request)
 		if !handleDecode(response, err) {

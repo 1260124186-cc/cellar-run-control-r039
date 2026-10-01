@@ -21,12 +21,22 @@ type vesselView struct {
 	ActiveRunID *string            `json:"active_run_id"`
 }
 
+type excursionView struct {
+	LimitC       float64 `json:"limit_c"`
+	Exceeded     bool    `json:"exceeded"`
+	Count        int     `json:"exceeded_observation_count"`
+	DurationSecs int64   `json:"exceeded_duration_seconds"`
+	FinalizedAt  *string `json:"finalized_at,omitempty"`
+}
+
 type runView struct {
 	ID           string                      `json:"id"`
 	State        domain.RunState             `json:"state"`
 	Version      int64                       `json:"version"`
 	VesselID     *string                     `json:"vessel_id"`
+	StartedAt    string                      `json:"started_at"`
 	Observations []domain.GravityObservation `json:"observations"`
+	Temperature  *excursionView              `json:"temperature_excursion"`
 	Metrics      *domain.RunMetrics          `json:"metrics"`
 }
 

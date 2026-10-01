@@ -43,11 +43,12 @@ type ReserveRunInput struct {
 }
 
 type ObservationInput struct {
-	Sequence     int
-	Gravity      float64
-	TemperatureC float64
-	ObservedAt   time.Time
-	Note         string
+	ExpectedVersion *int64
+	Sequence       int
+	Gravity        float64
+	TemperatureC   float64
+	ObservedAt     time.Time
+	Note           string
 }
 
 type FinishCleaningInput struct {

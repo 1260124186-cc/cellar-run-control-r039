@@ -81,7 +81,60 @@ func normalizeSnapshot(value domain.Snapshot) (domain.Snapshot, error) {
 	if err := validateIndexes(value); err != nil {
 		return domain.Snapshot{}, err
 	}
+	value = migrateTemperatureExcursions(value)
 	return value, nil
+}
+
+// migrateTemperatureExcursions backfills observations persisted before the
+// excursion summary existed. The attached formula is approved and therefore
+// immutable for the run's whole lifetime, so its current maximum fermentation
+// temperature is the limit that was in force at every legacy observation; this
+// reconstructs history without retroactively applying a changed threshold.
+func migrateTemperatureExcursions(value domain.Snapshot) domain.Snapshot {
+	for id, run := range value.Runs {
+		if len(run.Observations) == 0 {
+			continue
+		}
+		legacy := false
+		for index := range run.Observations {
+			if run.Observations[index].LimitC == 0 {
+				legacy = true
+				break
+			}
+		}
+		if !legacy && run.Temperature != nil {
+			continue
+		}
+		formula, found := value.Formulas[run.FormulaID]
+		if !found {
+			continue
+		}
+		if legacy {
+			for index := range run.Observations {
+				if run.Observations[index].LimitC != 0 {
+					continue
+				}
+				run.Observations[index].LimitC = formula.MaxFermentationTempC
+				run.Observations[index].TemperatureOver =
+					run.Observations[index].TemperatureC > formula.MaxFermentationTempC
+			}
+		}
+		var finalizeAt *time.Time
+		if (run.State == domain.RunCompleted || run.State == domain.RunAborted) && run.EndedAt != nil {
+			stamp := run.EndedAt.UTC()
+			finalizeAt = &stamp
+		}
+		run.Temperature = domain.SummarizeTemperatureExcursions(
+			run.Observations, finalizeAt, nil)
+		if run.Metrics != nil && run.Temperature != nil {
+			run.Metrics.TemperatureLimitC = run.Temperature.LimitC
+			run.Metrics.TemperatureExceeded = run.Temperature.Exceeded
+			run.Metrics.ExceededCount = run.Temperature.ExceededCount
+			run.Metrics.ExceededDurationSecs = run.Temperature.ExceededDurationS
+		}
+		value.Runs[id] = run
+	}
+	return value
 }
 
 func validateIndexes(value domain.Snapshot) error {

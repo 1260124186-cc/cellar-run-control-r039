@@ -3,18 +3,37 @@ package domain
 import "time"
 
 type GravityObservation struct {
-	RunID        string    `json:"run_id"`
-	Sequence     int       `json:"sequence"`
-	Gravity      float64   `json:"gravity"`
-	TemperatureC float64   `json:"temperature_c"`
-	ObservedAt   time.Time `json:"observed_at"`
-	Note         string    `json:"note,omitempty"`
-	ReceivedAt   time.Time `json:"received_at"`
+	RunID        string  `json:"run_id"`
+	Sequence     int     `json:"sequence"`
+	Gravity      float64 `json:"gravity"`
+	TemperatureC float64 `json:"temperature_c"`
+	// LimitC is the formula maximum fermentation temperature applied when the
+	// observation was written or last edited. It is snapshotted onto the
+	// observation so a later formula threshold change can never rewrite the
+	// excursion history of existing (including completed) runs.
+	LimitC          float64   `json:"temperature_limit_c"`
+	TemperatureOver bool      `json:"temperature_exceeded"`
+	ObservedAt      time.Time `json:"observed_at"`
+	Note            string    `json:"note,omitempty"`
+	ReceivedAt      time.Time `json:"received_at"`
 }
 
 func ValidateObservation(
 	runStartedAt time.Time,
 	previous *GravityObservation,
+	candidate GravityObservation,
+	now time.Time,
+) error {
+	return ValidateObservationPosition(runStartedAt, previous, nil, candidate, now)
+}
+
+// ValidateObservationPosition validates a candidate against both temporal
+// neighbours. When appending, next is nil; when editing an existing
+// observation, next is the observation immediately following the candidate.
+func ValidateObservationPosition(
+	runStartedAt time.Time,
+	previous *GravityObservation,
+	next *GravityObservation,
 	candidate GravityObservation,
 	now time.Time,
 ) error {
@@ -47,6 +66,16 @@ func ValidateObservation(
 		if candidate.Gravity-previous.Gravity > 0.010 {
 			return NewError(CodeObservationConflict,
 				"gravity must not rise more than 0.010 above the previous value")
+		}
+	}
+	if next != nil {
+		if !observed.Before(next.ObservedAt.UTC()) {
+			return NewError(CodeObservationConflict,
+				"observation time must increase strictly")
+		}
+		if next.Gravity-candidate.Gravity > 0.010 {
+			return NewError(CodeObservationConflict,
+				"gravity must not rise more than 0.010 between adjacent observations")
 		}
 	}
 	return nil

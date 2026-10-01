@@ -90,6 +90,7 @@ Run workflow:
 - `POST /v1/runs/{id}/reserve`
 - `POST /v1/runs/{id}/start`
 - `POST /v1/runs/{id}/observations`
+- `PUT /v1/runs/{id}/observations`
 - `POST /v1/runs/{id}/conditioning`
 - `POST /v1/runs/{id}/complete`
 - `POST /v1/runs/{id}/abort`
@@ -115,7 +116,20 @@ Run each production workflow check separately:
 go run ./cmd/fermentctl check formula-approval
 go run ./cmd/fermentctl check vessel-run-lifecycle
 go run ./cmd/fermentctl check observations-completion
+go run ./cmd/fermentctl check observations-abort
 ```
+
+Each observation records the formula maximum fermentation temperature that was
+in force when it was written (`temperature_limit_c`) and whether it exceeded
+that limit (`temperature_exceeded`). Each run carries a derived
+`temperature_excursion` summary with the current limit, the count of
+out-of-limit observations, and the accumulated out-of-limit duration. The
+summary is recomputed on append and on observation edit, and frozen (including
+the open interval from the last observation) when fermentation ends at
+conditioning entry, completion, or abort; the completed run's metrics repeat
+the same figures. Limits are snapshotted per observation, so a later formula
+threshold change applies only to new writes and never rewrites existing or
+completed runs.
 
 Each check creates a temporary snapshot directory, starts the real HTTP
 handler on a loopback listener, issues JSON requests, verifies success and

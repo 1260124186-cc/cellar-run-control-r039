@@ -14,20 +14,21 @@ const (
 )
 
 type FermentationRun struct {
-	ID             string               `json:"id"`
-	Code           string               `json:"code"`
-	FormulaID      string               `json:"formula_id"`
-	VesselID       *string              `json:"vessel_id,omitempty"`
-	PlannedVolumeL float64              `json:"planned_volume_liters"`
-	Notes          string               `json:"notes,omitempty"`
-	State          RunState             `json:"state"`
-	StartedAt      *time.Time           `json:"started_at,omitempty"`
-	EndedAt        *time.Time           `json:"ended_at,omitempty"`
-	Observations   []GravityObservation `json:"observations"`
-	Metrics        *RunMetrics          `json:"metrics,omitempty"`
-	Version        int64                `json:"version"`
-	CreatedAt      time.Time            `json:"created_at"`
-	UpdatedAt      time.Time            `json:"updated_at"`
+	ID             string                `json:"id"`
+	Code           string                `json:"code"`
+	FormulaID      string                `json:"formula_id"`
+	VesselID       *string               `json:"vessel_id,omitempty"`
+	PlannedVolumeL float64               `json:"planned_volume_liters"`
+	Notes          string                `json:"notes,omitempty"`
+	State          RunState              `json:"state"`
+	StartedAt      *time.Time            `json:"started_at,omitempty"`
+	EndedAt        *time.Time            `json:"ended_at,omitempty"`
+	Observations   []GravityObservation  `json:"observations"`
+	Temperature    *TemperatureExcursion `json:"temperature_excursion,omitempty"`
+	Metrics        *RunMetrics           `json:"metrics,omitempty"`
+	Version        int64                 `json:"version"`
+	CreatedAt      time.Time             `json:"created_at"`
+	UpdatedAt      time.Time             `json:"updated_at"`
 }
 
 func (r FermentationRun) Clone() FermentationRun {
@@ -48,6 +49,10 @@ func (r FermentationRun) Clone() FermentationRun {
 	if r.Metrics != nil {
 		value := *r.Metrics
 		cloned.Metrics = &value
+	}
+	if r.Temperature != nil {
+		value := *r.Temperature
+		cloned.Temperature = &value
 	}
 	return cloned
 }
@@ -91,7 +96,10 @@ func (r *FermentationRun) StartFermentation(now time.Time) error {
 	return nil
 }
 
-func (r *FermentationRun) AddObservation(observation GravityObservation) error {
+func (r *FermentationRun) AddObservation(
+	observation GravityObservation,
+	maxTempC float64,
+) error {
 	if r.State != RunFermenting || r.StartedAt == nil {
 		return NewError(CodeRunState, "observations require a fermenting run")
 	}
@@ -113,7 +121,51 @@ func (r *FermentationRun) AddObservation(observation GravityObservation) error {
 			"observation sequence must be contiguous and begin at 1")
 	}
 	observation.RunID = r.ID
+	observation.LimitC = maxTempC
+	observation.TemperatureOver = observation.TemperatureC > maxTempC
 	r.Observations = append(r.Observations, observation)
+	r.Temperature = SummarizeTemperatureExcursions(r.Observations, nil, r.Temperature)
+	r.UpdatedAt = observation.ReceivedAt.UTC()
+	r.Version++
+	return nil
+}
+
+// UpdateObservation revises an existing observation of a fermenting run. The
+// formula limit in force now is snapshotted onto the revised observation and
+// the derived excursion summary is recomputed synchronously; unedited
+// observations keep the limit they were written with, so a threshold change
+// never reaches into history.
+func (r *FermentationRun) UpdateObservation(
+	observation GravityObservation,
+	maxTempC float64,
+) error {
+	if r.State != RunFermenting || r.StartedAt == nil {
+		return NewError(CodeRunState, "observations can only be edited while fermenting")
+	}
+	if observation.Sequence < 1 || observation.Sequence > len(r.Observations) {
+		return NewError(CodeObservationConflict,
+			"observation sequence does not exist for this run")
+	}
+	index := observation.Sequence - 1
+	var previous *GravityObservation
+	if index > 0 {
+		value := r.Observations[index-1]
+		previous = &value
+	}
+	var next *GravityObservation
+	if index+1 < len(r.Observations) {
+		value := r.Observations[index+1]
+		next = &value
+	}
+	if err := ValidateObservationPosition(*r.StartedAt, previous, next,
+		observation, observation.ReceivedAt); err != nil {
+		return err
+	}
+	observation.RunID = r.ID
+	observation.LimitC = maxTempC
+	observation.TemperatureOver = observation.TemperatureC > maxTempC
+	r.Observations[index] = observation
+	r.Temperature = SummarizeTemperatureExcursions(r.Observations, nil, r.Temperature)
 	r.UpdatedAt = observation.ReceivedAt.UTC()
 	r.Version++
 	return nil
@@ -127,8 +179,13 @@ func (r *FermentationRun) BeginConditioning(now time.Time) error {
 		return NewError(CodeRunState,
 			"conditioning requires at least two observations")
 	}
+	stamp := now.UTC()
+	// Fermentation ends here, so the open interval after the last observation
+	// closes at the conditioning instant. Observations can no longer be
+	// appended or edited, which freezes the summary ahead of completion.
+	r.Temperature = SummarizeTemperatureExcursions(r.Observations, &stamp, r.Temperature)
 	r.State = RunConditioning
-	r.UpdatedAt = now.UTC()
+	r.UpdatedAt = stamp
 	r.Version++
 	return nil
 }
@@ -143,7 +200,8 @@ func (r *FermentationRun) Complete(originalGravity float64, now time.Time) error
 	}
 	stamp := now.UTC()
 	final := r.Observations[len(r.Observations)-1]
-	metrics := CalculateMetrics(originalGravity, final.Gravity, len(r.Observations))
+	r.Temperature = SummarizeTemperatureExcursions(r.Observations, &stamp, r.Temperature)
+	metrics := CalculateMetrics(originalGravity, final.Gravity, len(r.Observations), r.Temperature)
 	r.Metrics = &metrics
 	r.State = RunCompleted
 	r.EndedAt = &stamp
@@ -157,6 +215,9 @@ func (r *FermentationRun) Abort(now time.Time) error {
 		return NewError(CodeRunState, "completed or aborted runs cannot be aborted")
 	}
 	stamp := now.UTC()
+	// Freeze the derived excursion results at the abort instant, including the
+	// open interval from the last observation.
+	r.Temperature = SummarizeTemperatureExcursions(r.Observations, &stamp, r.Temperature)
 	r.State = RunAborted
 	r.EndedAt = &stamp
 	r.UpdatedAt = stamp

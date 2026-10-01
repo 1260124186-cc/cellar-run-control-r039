@@ -77,7 +77,8 @@ and `aborted`.
 - `fermenting -> conditioning` requires at least two observations.
 - `conditioning -> completed` requires at least three observations.
 - Completion computes apparent attenuation and estimated alcohol by volume from
-  the formula target original gravity and the last observation.
+  the formula target original gravity and the last observation, and finalizes
+  the temperature excursion summary into the metrics.
 - Completion moves the vessel to cleaning without losing its run association.
 - A non-completed run can be aborted. Aborting before fermentation releases an
   available vessel; aborting after fermentation schedules the vessel for
@@ -88,7 +89,8 @@ and `aborted`.
 ### GravityObservation
 
 An observation contains a run identifier, contiguous sequence number, observed
-time, gravity, temperature, optional note, and receipt time.
+time, gravity, temperature, the formula maximum fermentation temperature in
+force when it was written, an excursion flag, optional note, and receipt time.
 
 - Gravity is in the inclusive range 0.980 to 1.200.
 - Temperature is in the inclusive range -5 to 60 Celsius.
@@ -96,6 +98,31 @@ time, gravity, temperature, optional note, and receipt time.
 - Observation times strictly increase within a run.
 - Gravity must not rise more than 0.010 above the immediately preceding value.
 - Observation sequences are contiguous and start at 1.
+- Each observation is marked against the formula maximum fermentation
+  temperature in force at write time; an observation with a strictly higher
+  temperature is flagged as an excursion.
+- Observations of a fermenting run can be edited; an edit is revalidated
+  against both temporal neighbours and re-evaluated against the current
+  formula limit. Completed and aborted runs cannot be edited.
+- The limit is snapshotted onto the observation, so a later formula threshold
+  change applies only to writes after the change and never rewrites existing
+  or completed runs.
+
+### Temperature Excursion Summary
+
+A run carries a derived temperature excursion summary: the currently applied
+limit, an exceeded flag, the number of excursion observations, and the
+accumulated excursion duration in seconds.
+
+- The temperature state at an observation persists until the next observation;
+  adjacent intervals of excursion observations accumulate into the duration.
+- The summary is recomputed synchronously whenever an observation is appended
+  or edited.
+- When fermentation ends at conditioning entry, on abort, or on completion the
+  open interval from the last observation is included and the summary is
+  frozen. Conditioning and completion reuse the frozen summary.
+- Completion copies the frozen figures into the run metrics, so run detail,
+  run listing, and final metrics report identical values.
 
 ## Connected Workflows
 
@@ -138,14 +165,23 @@ rules, storage coordination, and resource lifecycle.
 Public entry points are:
 
 - `POST /v1/runs/{id}/observations`
+- `PUT /v1/runs/{id}/observations`
 - `POST /v1/runs/{id}/conditioning`
 - `POST /v1/runs/{id}/complete`
 - `GET /v1/runs/{id}`
+- `GET /v1/runs`
+- `POST /v1/runs/{id}/abort`
 
 The client appends three ordered observations, starts conditioning, completes
 the run, and reads the calculated result. Non-monotonic times, rising gravity,
 out-of-range values, excessive sequences, incomplete data, and repeated
-transitions return stable failures without changing persisted state.
+transitions return stable failures without changing persisted state. Every
+append marks the observation against the formula maximum fermentation
+temperature and maintains an accumulated excursion duration; editing an
+observation and aborting a run synchronously update the derived summary, and
+completion freezes it into the final metrics. Threshold changes apply only to
+later writes, so completed runs are not retroactively rewritten and detail,
+list, and final metric views agree.
 
 This path crosses HTTP protocol handling, application orchestration, numeric
 domain rules, and snapshot storage.
@@ -217,6 +253,7 @@ behavior, and exit without external services:
 - `go run ./cmd/fermentctl check formula-approval`
 - `go run ./cmd/fermentctl check vessel-run-lifecycle`
 - `go run ./cmd/fermentctl check observations-completion`
+- `go run ./cmd/fermentctl check observations-abort`
 
 ## Scope Limits
 

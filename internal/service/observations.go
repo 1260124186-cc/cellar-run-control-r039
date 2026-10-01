@@ -12,6 +12,10 @@ func (s *Service) AppendObservation(
 		if !ok {
 			return domain.NewError(domain.CodeRunNotFound, "run was not found")
 		}
+		formula, ok := snapshot.Formulas[run.FormulaID]
+		if !ok {
+			return domain.NewError(domain.CodeFormulaNotFound, "attached formula was not found")
+		}
 		now := s.clock.Now()
 		observation := domain.GravityObservation{
 			RunID:        run.ID,
@@ -22,7 +26,47 @@ func (s *Service) AppendObservation(
 			Note:         input.Note,
 			ReceivedAt:   now,
 		}
-		if err := run.AddObservation(observation); err != nil {
+		if err := run.AddObservation(observation, formula.MaxFermentationTempC); err != nil {
+			return err
+		}
+		snapshot.Runs[id] = run.Clone()
+		updated = run.Clone()
+		return nil
+	})
+	if err != nil {
+		return domain.FermentationRun{}, err
+	}
+	return updated, nil
+}
+
+func (s *Service) UpdateObservation(
+	id string,
+	input ObservationInput,
+) (domain.FermentationRun, error) {
+	var updated domain.FermentationRun
+	err := s.store.Execute(func(snapshot *domain.Snapshot) error {
+		run, ok := snapshot.Runs[id]
+		if !ok {
+			return domain.NewError(domain.CodeRunNotFound, "run was not found")
+		}
+		if err := s.checkExpected(run.Version, input.ExpectedVersion); err != nil {
+			return err
+		}
+		formula, ok := snapshot.Formulas[run.FormulaID]
+		if !ok {
+			return domain.NewError(domain.CodeFormulaNotFound, "attached formula was not found")
+		}
+		now := s.clock.Now()
+		observation := domain.GravityObservation{
+			RunID:        run.ID,
+			Sequence:     input.Sequence,
+			Gravity:      input.Gravity,
+			TemperatureC: input.TemperatureC,
+			ObservedAt:   input.ObservedAt.UTC(),
+			Note:         input.Note,
+			ReceivedAt:   now,
+		}
+		if err := run.UpdateObservation(observation, formula.MaxFermentationTempC); err != nil {
 			return err
 		}
 		snapshot.Runs[id] = run.Clone()
