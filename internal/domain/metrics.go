@@ -7,6 +7,11 @@ type RunMetrics struct {
 	ApparentAttenuation float64 `json:"apparent_attenuation_percent"`
 	EstimatedAlcoholABV float64 `json:"estimated_alcohol_abv"`
 	ObservationCount    int     `json:"observation_count"`
+	// Temperature excursion results are copied from the finalized run
+	// summary so completion metrics stay consistent with run details.
+	TempLimitC           float64 `json:"temperature_limit_celsius"`
+	TempBreachCount      int     `json:"temperature_breach_count"`
+	TempExcursionSeconds int64   `json:"temperature_excursion_seconds"`
 }
 
 func CalculateMetrics(originalGravity, finalGravity float64, count int) RunMetrics {

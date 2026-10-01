@@ -113,6 +113,27 @@
         "domain",
         "storage"
       ]
+    },
+    {
+      "id": "temperature-excursions",
+      "name": "Mark temperature breaches, accumulate duration, and finalize on termination",
+      "entry": "POST /v1/runs/{id}/observations",
+      "steps": [
+        "capture the formula maximum temperature when fermentation starts",
+        "append observations and mark every over-limit reading",
+        "accumulate closed breach intervals and expose an open breach",
+        "complete or abort the run to finalize the total excursion duration",
+        "confirm detail, list, and final metrics agree and later thresholds do not apply retroactively"
+      ],
+      "success": "returns per-observation breach markers and a finalized excursion summary",
+      "failure": "range, time, and state validations still reject invalid observations without partial writes",
+      "verification": "the check issues real HTTP requests and domain unit tests assert exact durations with controlled times",
+      "module_ids": [
+        "httpapi",
+        "service",
+        "domain",
+        "storage"
+      ]
     }
   ]
 }

@@ -22,7 +22,11 @@ func (s *Service) AppendObservation(
 			Note:         input.Note,
 			ReceivedAt:   now,
 		}
-		if err := run.AddObservation(observation); err != nil {
+		formula, ok := snapshot.Formulas[run.FormulaID]
+		if !ok {
+			return domain.NewError(domain.CodeFormulaNotFound, "attached formula was not found")
+		}
+		if err := run.AddObservation(observation, formula.MaxFermentationTempC); err != nil {
 			return err
 		}
 		snapshot.Runs[id] = run.Clone()
@@ -79,7 +83,8 @@ func (s *Service) CompleteRun(
 		if !ok {
 			return domain.NewError(domain.CodeFormulaNotFound, "attached formula was not found")
 		}
-		if err := run.Complete(formula.TargetOriginalGravity, s.clock.Now()); err != nil {
+		if err := run.Complete(formula.TargetOriginalGravity,
+			formula.MaxFermentationTempC, s.clock.Now()); err != nil {
 			return err
 		}
 		if run.VesselID == nil {

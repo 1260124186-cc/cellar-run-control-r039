@@ -22,12 +22,19 @@ type vesselView struct {
 }
 
 type runView struct {
-	ID           string                      `json:"id"`
-	State        domain.RunState             `json:"state"`
-	Version      int64                       `json:"version"`
-	VesselID     *string                     `json:"vessel_id"`
-	Observations []domain.GravityObservation `json:"observations"`
-	Metrics      *domain.RunMetrics          `json:"metrics"`
+	ID                   string                       `json:"id"`
+	State                domain.RunState              `json:"state"`
+	Version              int64                        `json:"version"`
+	VesselID             *string                      `json:"vessel_id"`
+	StartedAt            *time.Time                   `json:"started_at"`
+	MaxTempLimitC        *float64                     `json:"max_temp_limit_c"`
+	Observations         []domain.GravityObservation  `json:"observations"`
+	TemperatureExcursion *domain.TemperatureExcursion `json:"temperature_excursion"`
+	Metrics              *domain.RunMetrics           `json:"metrics"`
+}
+
+type runListView struct {
+	Runs []runView `json:"runs"`
 }
 
 type pairView struct {

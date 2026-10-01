@@ -67,6 +67,11 @@ A run contains an identifier, unique run code, an approved formula identifier,
 an optional vessel identifier, planned volume, notes, lifecycle state,
 timetable, ordered observations, final metrics, version, and timestamps.
 
+When fermentation starts, the run captures the formula's maximum fermentation
+temperature. Every excursion result is derived against that captured value, so
+later formula changes only affect runs started afterwards and never rewrite a
+run that is already completed or aborted.
+
 States are `planned`, `reserved`, `fermenting`, `conditioning`, `completed`,
 and `aborted`.
 
@@ -85,10 +90,26 @@ and `aborted`.
 - Completed and aborted runs are immutable.
 - A run can carry at most 500 observations.
 
+### Temperature excursions
+
+Each observation is marked `temperature_over_limit` when its temperature is
+strictly above the run's captured formula maximum. A breach begins at the first
+over-limit reading and remains open until the next reading at or below the
+limit; the full interval between those readings is accumulated as the breach
+duration. A breach still open at the last reading is marked open on the run
+detail and contributes no elapsed time while the run is active. Completion and
+abort close any open breach at the termination timestamp, finalize the total
+duration in seconds, and completion copies the limit, breach count, and total
+duration into the final metrics. The same persisted summary is returned by run
+detail and the run list. Appending an observation always recomputes the derived
+result, so details, lists, and final metrics never disagree.
+
 ### GravityObservation
 
 An observation contains a run identifier, contiguous sequence number, observed
-time, gravity, temperature, optional note, and receipt time.
+time, gravity, temperature, optional note, receipt time, and a derived
+`temperature_over_limit` marker computed against the run's captured formula
+maximum.
 
 - Gravity is in the inclusive range 0.980 to 1.200.
 - Temperature is in the inclusive range -5 to 60 Celsius.
@@ -96,6 +117,8 @@ time, gravity, temperature, optional note, and receipt time.
 - Observation times strictly increase within a run.
 - Gravity must not rise more than 0.010 above the immediately preceding value.
 - Observation sequences are contiguous and start at 1.
+- The over-limit marker is not client supplied; it is recomputed whenever the
+  observation list changes.
 
 ## Connected Workflows
 
@@ -204,19 +227,21 @@ workflow checks use temporary directories.
 
 ## Validation Plan
 
-The baseline declares `testing: deferred` and intentionally contains no unit
-tests, fixtures, integration tests, or browser E2E files. A later verification
-task owns systematic tests for validation boundaries, state transitions,
-numeric calculations, stale revisions, storage failures, and concurrent
-reservation attempts.
+The temperature excursion behavior is covered by focused domain unit tests for
+marking, interval accumulation, open-breach handling, termination
+finalization, and captured-threshold isolation. Broader systematic coverage of
+validation boundaries, state transitions, numeric calculations, stale
+revisions, storage failures, and concurrent reservation attempts remains with
+the later verification task.
 
-The current build command is `go build ./...`. Three bounded production checks
+The current build command is `go build ./...`. Four bounded production checks
 start the real HTTP handler, issue real JSON requests, check success and failure
 behavior, and exit without external services:
 
 - `go run ./cmd/fermentctl check formula-approval`
 - `go run ./cmd/fermentctl check vessel-run-lifecycle`
 - `go run ./cmd/fermentctl check observations-completion`
+- `go run ./cmd/fermentctl check temperature-excursions`
 
 ## Scope Limits
 

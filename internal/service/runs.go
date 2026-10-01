@@ -116,6 +116,10 @@ func (s *Service) StartRun(
 		if run.VesselID == nil {
 			return domain.NewError(domain.CodeRunState, "run has no vessel")
 		}
+		formula, ok := snapshot.Formulas[run.FormulaID]
+		if !ok {
+			return domain.NewError(domain.CodeFormulaNotFound, "attached formula was not found")
+		}
 		vessel, ok := snapshot.Vessels[*run.VesselID]
 		if !ok {
 			return domain.NewError(domain.CodeVesselNotFound, "vessel was not found")
@@ -123,7 +127,7 @@ func (s *Service) StartRun(
 		if err := vessel.StartRun(run.ID, s.clock.Now()); err != nil {
 			return err
 		}
-		if err := run.StartFermentation(s.clock.Now()); err != nil {
+		if err := run.StartFermentation(formula.MaxFermentationTempC, s.clock.Now()); err != nil {
 			return err
 		}
 		snapshot.Runs[id] = run.Clone()
@@ -153,7 +157,15 @@ func (s *Service) AbortRun(
 			return err
 		}
 		hadStarted := run.HadStarted()
-		if err := run.Abort(s.clock.Now()); err != nil {
+		var maxTempLimitC float64
+		if hadStarted {
+			formula, ok := snapshot.Formulas[run.FormulaID]
+			if !ok {
+				return domain.NewError(domain.CodeFormulaNotFound, "attached formula was not found")
+			}
+			maxTempLimitC = formula.MaxFermentationTempC
+		}
+		if err := run.Abort(maxTempLimitC, s.clock.Now()); err != nil {
 			return err
 		}
 		if run.VesselID != nil {

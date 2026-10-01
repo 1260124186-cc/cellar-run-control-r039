@@ -10,6 +10,9 @@ type GravityObservation struct {
 	ObservedAt   time.Time `json:"observed_at"`
 	Note         string    `json:"note,omitempty"`
 	ReceivedAt   time.Time `json:"received_at"`
+	// TempOverLimit is derived against the formula temperature limit
+	// captured by the run. It is recomputed whenever observations change.
+	TempOverLimit bool `json:"temperature_over_limit"`
 }
 
 func ValidateObservation(

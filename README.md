@@ -2,13 +2,15 @@
 
 Cellar Run Control is a local Go HTTP service for coordinating a small
 production cellar. It keeps formula approval, vessel availability, active
-fermentation runs, gravity observations, conditioning, completion metrics, and
-vessel cleaning in one deterministic process.
+fermentation runs, gravity observations, formula-temperature excursion
+tracking, conditioning, completion metrics, and vessel cleaning in one
+deterministic process.
 
-This repository is a healthy initialization baseline. It has no intentional
-defects and no automated test suite. Tests are intentionally deferred to a
-later engineering task; the production workflow checks in this repository
-remain available for immediate build and behavior verification.
+This repository starts from a healthy initialization baseline. Focused domain
+unit tests cover the temperature excursion calculation; broader automated
+coverage remains deferred to a later engineering task. The production workflow
+checks in this repository stay available for immediate build and behavior
+verification.
 
 ## Requirements
 
@@ -107,6 +109,23 @@ shape:
 }
 ```
 
+## Temperature Excursions
+
+When fermentation starts, a run captures the approved formula's maximum
+fermentation temperature. Every observation is marked
+`temperature_over_limit` when it reads strictly above that captured value.
+The run detail and the run list both carry a `temperature_excursion` summary
+with the captured `limit_celsius`, `breach_count`, `total_duration_seconds`,
+and whether a breach is still `open`.
+
+A breach begins at the first over-limit reading and is charged until the next
+in-range reading. A breach still open at the last reading stays open and
+uncounted while the run is active; completing or aborting the run closes it at
+the termination time and finalizes the total. Completion metrics repeat the
+limit, breach count, and total seconds. Because the limit is captured per run,
+changing a formula threshold affects only runs started afterwards and never
+rewrites completed or aborted runs.
+
 ## Workflow Checks
 
 Run each production workflow check separately:
@@ -115,6 +134,7 @@ Run each production workflow check separately:
 go run ./cmd/fermentctl check formula-approval
 go run ./cmd/fermentctl check vessel-run-lifecycle
 go run ./cmd/fermentctl check observations-completion
+go run ./cmd/fermentctl check temperature-excursions
 ```
 
 Each check creates a temporary snapshot directory, starts the real HTTP
@@ -153,9 +173,10 @@ automated tests or request a focused repair without changing the public API.
 
 ## Test Boundary
 
-This stage does not create unit tests, integration tests, test fixtures, or an
-E2E suite. The later test task owns systematic coverage of validation limits,
-state transitions, concurrency, persistence failures, and numeric edge cases.
+Focused domain unit tests cover temperature excursion marking and duration
+accumulation. The later test task still owns systematic coverage of validation
+limits, state transitions, concurrency, persistence failures, and numeric edge
+cases.
 
 ## Scope
 
